@@ -1,51 +1,35 @@
-import ipywidgets as widgets
+#import necessary libraries
+import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
-from astropy import units as u
-from astropy.io import fits
-from scipy.ndimage import rotate
 import pickle
 import glob
 import os
 import re
-from scipy.ndimage import median_filter
-import numpy as np
+import warnings
+
+#import astropy tools for fits file manipulation
+from astropy import units as u, io, modeling
 from astropy.io import fits
-from scipy.ndimage import rotate
-from specutils.fitting import fit_generic_continuum,fit_lines
-import specutils
-from specutils import Spectrum1D,SpectralRegion,SpectrumCollection
-import numpy as np
-import matplotlib.pyplot as plt
-
-from astropy.modeling import models
-from astropy import units as u
-from astroquery.nist import Nist
-import pandas as pd
 from astropy.modeling.fitting import LinearLSQFitter
-from scipy.signal import find_peaks
-from specutils.fitting import estimate_line_parameters
-from specutils.manipulation import extract_region
-from specutils.manipulation import LinearInterpolatedResampler
-from specutils.manipulation import noise_region_uncertainty
-from specutils.fitting import find_lines_derivative
-from specutils.manipulation import noise_region_uncertainty
-from specutils.manipulation import gaussian_smooth
-from specutils.analysis import line_flux,centroid
-from specutils.analysis import gaussian_sigma_width, gaussian_fwhm, fwhm, fwzi
+from scipy.ndimage import rotate, median_filter
 import scipy.integrate
-import pandas as pd
-# Example usage
-#paths = glob.glob(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/EUV_test/*1223*.fits')
-#paths = glob.glob(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/EUV_test/*.fits')
-# filter0=''
-# filter1= r'/Users/arkhan/Documents/Aspera_Lamp_analysis/*?.fits'
-# filter1= r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/*/*/*12**Ar*12*.fits'
+from scipy.signal import find_peaks
 
-# filter2=r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/*/*He*.fits'
-# filter3=r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/*/*12*N2*.fits'
-# paths = sorted(glob.glob(filter1,recursive=True)+
-#                glob.glob(filter0)+glob.glob(filter0), key=os.path.getmtime)
-
+# Import spectral fitting and manipulation tools
+import specutils
+from specutils.fitting import fit_generic_continuum, fit_lines, find_lines_derivative,estimate_line_parameters
+from specutils import Spectrum1D, SpectralRegion, SpectrumCollection
+from specutils.manipulation import extract_region, LinearInterpolatedResampler, noise_region_uncertainty, gaussian_smooth
+from specutils.analysis import line_flux, centroid, gaussian_sigma_width
+from specutils.fitting import fit_generic_continuum, fit_lines, find_lines_derivative,estimate_line_parameters
+from specutils import Spectrum1D, SpectralRegion, SpectrumCollection
+from specutils.manipulation import extract_region, LinearInterpolatedResampler, noise_region_uncertainty, gaussian_smooth
+from specutils.analysis import line_flux, centroid, gaussian_sigma_width
+#NIST database for atomic lines
+from astroquery.nist import Nist
+from astropy.modeling import models
+# Define the global variables
 global angle,image_vmin,image_vmax,ymin,ymax,extract_xmax,extract_xmin,shift_per_step
 # Define the extraction region for the spectrum
 extract_ymax=900 # max limit in the y direction for extraction_region from the fits image 
@@ -63,27 +47,42 @@ image_vmax=15 # contrast limits for the image
 ymin=0 # contrast limits for the spectrum
 ymax=1500 # contrast limits for the spectrum
 
-
 def set_plot_aesthetics():
+    """
+    Set the aesthetics of the plots using matplotlib style settings.
+
+    This function sets the font size, title size, label size, tick size, legend size,
+    figure size, tick direction, and visibility of minor ticks.
+
+    """
     plt.style.use({
-        'font.size': 15,
-        'axes.titlesize': 15,
-        'axes.labelsize': 15,
-        'xtick.labelsize': 15,
-        'ytick.labelsize': 15,
-        'legend.fontsize': 10,
-        'figure.figsize': [20, 14],
-        'xtick.direction': 'in',
-        'ytick.direction': 'in',
-        'xtick.minor.visible': True,
-        'ytick.minor.visible': True,
-        'xtick.minor.size': 3,
-        'ytick.minor.size': 3,
-        'xtick.major.size': 7.5,
-        'ytick.major.size': 7.5
+        'font.size': 15,  # Set the font size
+        'axes.titlesize': 15,  # Set the title size
+        'axes.labelsize': 15,  # Set the label size
+        'xtick.labelsize': 15,  # Set the x-axis tick label size
+        'ytick.labelsize': 15,  # Set the y-axis tick label size
+        'legend.fontsize': 10,  # Set the legend font size
+        'figure.figsize': [20, 14],  # Set the figure size
+        'xtick.direction': 'in',  # Set the x-axis tick direction
+        'ytick.direction': 'in',  # Set the y-axis tick direction
+        'xtick.minor.visible': True,  # Set the visibility of minor ticks on the x-axis
+        'ytick.minor.visible': True,  # Set the visibility of minor ticks on the y-axis
+        'xtick.minor.size': 3,  # Set the size of minor ticks on the x-axis
+        'ytick.minor.size': 3,  # Set the size of minor ticks on the y-axis
+        'xtick.major.size': 7.5,  # Set the size of major ticks on the x-axis
+        'ytick.major.size': 7.5  # Set the size of major ticks on the y-axis
     })
 
 def find_fits_files(directory):
+    """
+    Find all FITS files in a given directory and its subdirectories.
+
+    Parameters:
+    directory (str): The directory to search for FITS files.
+
+    Returns:
+    list: A list of filepaths for all the found FITS files.
+    """
     filepaths = []
     for root, dirs, files in os.walk(directory):
         for file in files:
@@ -91,20 +90,41 @@ def find_fits_files(directory):
                 filepaths.append(os.path.join(root, file))
     return filepaths
 
-def get_spectrum_from_fits(filepath, angle, extract_ymin, extract_ymax,extract_xmin,extract_xmax):
+def get_spectrum_from_fits(filepath, angle, extract_ymin, extract_ymax, extract_xmin, extract_xmax):
+    """
+    Extract a filtered spectrum from a FITS file.
+
+    Parameters:
+    filepath (str): The path to the FITS file.
+    angle (float): The angle of rotation for the image.
+    extract_ymin (int): The minimum limit in the y direction for the extraction region.
+    extract_ymax (int): The maximum limit in the y direction for the extraction region.
+    extract_xmin (int): The minimum limit in the x direction for the extraction region.
+    extract_xmax (int): The maximum limit in the x direction for the extraction region.
+
+    Returns:
+    Spectrum1D: The filtered spectrum.
+
+    """
     # Get the data from the FITS file
     data_array = fits.getdata(filepath)
-    # Calculate the contrast limits based on the data
+
+    # Rotate the data array by the specified angle
     data_rotated = rotate_image(data_array, angle)
+
+    # Crop the rotated data to the specified extraction region
     cropped_data = data_rotated[extract_ymin:extract_ymax, extract_xmin:extract_xmax]
-    spectra_data = u.quantity.Quantity(cropped_data, unit='adu')
 
     # Convert the cropped data to a Spectrum1D object
-    spectrum = Spectrum1D(flux=spectra_data, spectral_axis=np.arange(extract_xmin,extract_xmax) * u.pixel)
+    spectra_data = u.quantity.Quantity(cropped_data, unit='adu')
+    spectrum = Spectrum1D(flux=spectra_data, spectral_axis=np.arange(extract_xmin, extract_xmax) * u.pixel)
+
     # Collapse the spectrum in the spatial direction
     collapsed_spectrum = np.sum(spectrum.flux, axis=0)
+
     # Apply median filter to the collapsed spectrum
     filtered_spectrum = Spectrum1D(flux=u.quantity.Quantity(median_filter(collapsed_spectrum, size=3)), spectral_axis=spectrum.spectral_axis)
+
     return filtered_spectrum
 
 def get_spectrum_from_array(spectrum_array):
@@ -141,23 +161,35 @@ def rotate_image(data_array, angle):
     rotated_data = rotate(data_array, angle, reshape=False)
     return rotated_data
 
-def plot_spectrum_1D(spectrum,savepath=None):
-            # Create another figure and plot the collapsed spectrum
-        fig, ax_spectrum = plt.subplots(figsize=(8, 6))
-        ax_spectrum.plot(spectrum.spectral_axis, spectrum.flux)
-        ax_spectrum.set_xlabel('Pixel')
-        ax_spectrum.set_ylabel('Flux (counts)')
-        ax_spectrum.set_title('1D spectrum plot')
-        ax_spectrum.set_xlim(extract_xmin, extract_xmax)
-        ax_spectrum.set_ylim(ymin, ymax)
-        ax_spectrum.tick_params(which='both', width=1.5, length=3.5, direction='in')  # decorating minor and major ticks
+def plot_spectrum_1D(spectrum, savepath=None):
+    """
+    Plot a 1D spectrum.
 
-        #plt.grid(which='both')
-        if savepath!=None: 
-            savefile=os.path.dirname(savepath)+'/process_with_file_images.png'
-            plt.savefig(savefile)
-        # Show the figures
-        plt.show()
+    Args:
+        spectrum (Spectrum1D): The spectrum to be plotted.
+        savepath (str, optional): The path to save the plot. If None, the plot will be displayed but not saved.
+
+    Returns:
+        None
+    """
+
+    # Create another figure and plot the collapsed spectrum
+    fig, ax_spectrum = plt.subplots(figsize=(8, 6))
+    ax_spectrum.plot(spectrum.spectral_axis, spectrum.flux)
+    ax_spectrum.set_xlabel('Pixel')
+    ax_spectrum.set_ylabel('Flux (counts)')
+    ax_spectrum.set_title('1D spectrum plot')
+    ax_spectrum.set_xlim(extract_xmin, extract_xmax)
+    ax_spectrum.set_ylim(ymin, ymax)
+    ax_spectrum.tick_params(which='both', width=1.5, length=3.5, direction='in')  # decorating minor and major ticks
+
+    # Save the plot if savepath is provided
+    if savepath is not None: 
+        savefile = os.path.dirname(savepath) + '/process_with_file_images.png'
+        plt.savefig(savefile)
+
+    # Show the plot
+    plt.show()
 
 def process_files_with_subplots(filepaths):
     """
@@ -194,7 +226,6 @@ def process_files_with_subplots(filepaths):
 
     # Adjust the spacing between subplots
     plt.tight_layout()
-    # plt.savefig(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/EUV_test/output/subplots_all.png')
     savefile=os.path.dirname(filepath)+'/subplots_all.png'
     plt.savefig(savefile)
 
@@ -364,61 +395,72 @@ def process_files_images(filepaths):
         # Show the figures
         plt.show()
 
-def extract_spectral_lines(spectrum, height_threshold, width_threshold):
-    # Find the peaks in the spectrum above the threshold
-    peaks, _ = find_peaks(spectrum, height=height_threshold)
+def apply_spectral_step_calibration(spectral_axis, reference_step, shift_per_step): 
+    """
+    Apply the spectral calibration of pixel to monochromator steps.
 
-    # Check if any peaks were found
-    if len(peaks) == 0:
-        return []
+    Parameters:
+        spectral_axis (array-like): The original spectral axis.
+        step (float): The reference step value.
+        shift_per_step (float): The shift per step value.
 
-    # Calculate the widths and heights of the peaks
-    widths = peak_widths(spectrum, peaks)[0]
-    heights = spectrum[peaks]
-
-    # Filter out peaks that are too narrow or too short
-    valid_peaks = []
-    for i in range(len(peaks)):
-        if widths[i] > width_threshold and heights[i] > heights_threshold:
-            valid_peaks.append(peaks[i])
-
-    # Extract the spectral lines based on the valid peaks
-    spectral_lines = []
-    for peak in valid_peaks:
-        line = {
-            'position': peak,
-            'width': widths[peaks.index(peak)],
-            'height': heights[peaks.index(peak)]
-        }
-        spectral_lines.append(line)
-
-    return spectral_lines
-
-def apply_spectral_step_calibration(spectral_axis,step,shift_per_step): 
-    # Apply the spectral calibration
-    # Define the wavelength calibration parameters
-    cal_spectral_axis=((spectral_axis-(min(spectral_axis)+max(spectral_axis))/2)/shift_per_step)+step
-
-
-    # Calculate the wavelength values
-
+    Returns:
+        array-like: The calibrated spectral axis.
+    """
+    # Apply the spectral calibration formula
+    cal_spectral_axis = ((spectral_axis - (min(spectral_axis) + max(spectral_axis)) / 2) / shift_per_step) + reference_step
     return cal_spectral_axis
 
-def apply_wavelength_calibration(spectral_axis_step,ref_wavelength,reference_step,cal_wavelenght,cal_step):
-    #wave_calibrated=ref_wavelength+((spectral_axis-reference_step)*(cal_wavelenght-ref_wavelength)/(cal_step-reference_step))
-    scale=np.abs((cal_wavelenght-ref_wavelength)/(cal_step-reference_step))
-    wave_calibrated= (spectral_axis_step-reference_step)*scale+ref_wavelength
+def apply_wavelength_calibration(spectral_axis_step, ref_wavelength, reference_step, cal_wavelength, cal_step):
+    """
+    Apply the wavelength calibration to the spectral axis in monochrmator steps
+
+    Parameters:
+        spectral_axis_step (array-like): The original spectral axis in monochromator steps.
+        ref_wavelength (float): The reference wavelength.
+        reference_step (float): The reference step value.
+        cal_wavelength (float): The calibrated wavelength.
+        cal_step (float): The calibrated step value.
+
+    Returns:
+        array-like: The calibrated spectral axis in wavelength.
+    """
+    # Calculate the scale factor
+    scale = np.abs((cal_wavelength - ref_wavelength) / (cal_step - reference_step))
+    
+    # Apply the wavelength calibration formula
+    wave_calibrated = (spectral_axis_step - reference_step) * scale + ref_wavelength
+    
     return wave_calibrated
 
 def get_continuum_fit(spectrum): 
+    """
+    Fit a continuum model to the spectrum.
+
+    Parameters:
+        spectrum (Spectrum1D): The input spectrum.
+
+    Returns:
+        Spectrum1D: The fitted continuum spectrum.
+    """
     with warnings.catch_warnings():  # Ignore warnings
         warnings.simplefilter('ignore')
         g1_fit = fit_generic_continuum(spectrum)
     
     y_continuum_fitted = g1_fit(spectrum.spectral_axis)
-    fitted_continum=Spectrum1D(flux=y_continuum_fitted, spectral_axis=spectrum.spectral_axis)
+    fitted_continum = Spectrum1D(flux=y_continuum_fitted, spectral_axis=spectrum.spectral_axis)
+    return fitted_continum
 
 def select_file_from_list(filepaths):
+    """
+    Select a file from a list of filepaths.
+
+    Parameters:
+        filepaths (list): A list of filepaths.
+
+    Returns:
+        str: The selected filepath.
+    """
     print("Select a file:")
     for i, filepath in enumerate(filepaths):
         print(f"{i+1}. {os.path.basename(filepath)}")
@@ -646,109 +688,142 @@ def get_nist_lines(Gas_filter, minwave,maxwave):
     ref_lines=ref_lines[(ref_lines['Observed']>minwave.value)&(ref_lines['Observed']<maxwave.value)]
     return ref_lines
 
-def print_nist_lines(minwave,maxwave): 
-    minwave = 90 * u.nm
-    maxwave = 108 * u.nm
-    # then we search for atomic lines
-    # We are only interested in neutral lines, assuming the lamps are not hot enough to ionize the atoms
-    Ar_lines = Nist.query(minwave,maxwave, linename="Ar I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-    Ar_lines=Ar_lines[(Ar_lines['Observed']>minwave.value)&(Ar_lines['Observed']<maxwave.value)]
+def print_nist_lines(minwave=90*u.m,maxwave=108*u.nm): 
+    """
+    Prints the NIST lines within the specified wavelength range for different species.
 
+    Args:
+        minwave (Quantity, optional): The minimum wavelength. Default is 90 nm.
+        maxwave (Quantity, optional): The maximum wavelength. Default is 108 nm.
+    """
+    specie_list=['Ar','He','N','O','H']
+    
+    # Search for atomic lines within the specified wavelength range
+    def print_nist_lines(minwave, maxwave): 
+        """
+        Prints the NIST lines within the specified wavelength range for a specific species.
 
-    He_lines = Nist.query(minwave,maxwave, linename="He I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-    He_lines=He_lines[(He_lines['Observed']>minwave.value)&(He_lines['Observed']<maxwave.value)]
+        Args:
+            minwave (Quantity): The minimum wavelength.
+            maxwave (Quantity): The maximum wavelength.
+        """
+        specie_list=['Ar','He','N','O']
+        all_lines=[]
+        for specie in specie_list:
+            # Query NIST database for lines of the specific species
+            lines = Nist.query(minwave, maxwave, linename=f"{specie} I",
+                               energy_level_unit='eV', output_order='wavelength',
+                               wavelength_type='vacuum')
+            lines = lines[(lines['Observed'] > minwave.value) & (lines['Observed'] < maxwave.value)]
+            print(f"{specie} lines")
+            print(lines)
+            all_lines.append(lines)
 
-    NI_lines = Nist.query(minwave,maxwave, linename="N I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-
-    NI_lines=NI_lines[(NI_lines['Observed']>minwave.value)&(NI_lines['Observed']<maxwave.value)]
-
-    OI_lines = Nist.query(minwave,maxwave, linename="O I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-
-    OI_lines=OI_lines[(OI_lines['Observed']>minwave.value)&(OI_lines['Observed']<maxwave.value)]
-
-
-    HI_lines = Nist.query(minwave,maxwave, linename="H I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-
-    HI_lines=HI_lines[(HI_lines['Observed']>minwave.value)&(HI_lines['Observed']<maxwave.value)]
-    print("HI lines")
-    print(HI_lines)
-    print("He lines")
-    print(He_lines)
-    print("Nitrogen lines")
-    print(NI_lines)
-    print("Oxygen lines")
-    print(OI_lines)
-    print("Argon lines")
-    print(Ar_lines)
-    return 
+        return all_lines
 
 def generate_fits_database(path=r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data'):
-    allfiles=find_fits_files(path)
-    #print(allfiles)
-    # Create a list to store the file names and exposure times
+    """
+    Generates a fits database from the FITS files in the specified path.
+
+    Args:
+        path (str): The path to the directory containing the FITS files. Default is '/Users/arkhan/Documents/Aspera_Lamp_analysis/data'.
+
+    Returns:
+        pandas.DataFrame: The generated fits database.
+    """
+    # Find all FITS files in the specified path
+    allfiles = find_fits_files(path)
+
+    # Create lists to store the file names, exposure times, step numbers, and file paths
     file_list = []
-    step_list= []
-    filepaths=[]
+    step_list = []
+    filepaths = []
+
     # Iterate over the file paths
-    for idx,filepath in enumerate(allfiles):
+    for idx, filepath in enumerate(allfiles):
         # Get the file name
         filename = os.path.basename(filepath)
-        
+
         # Read the fits header
         header = fits.getheader(filepath)
-        
+
         # Get the exposure time from the header
         exposure_time = header['INT-TIME']
-        
-        # Append the file name and exposure time to the list if the filename has a step number
-        if extract_numbers_from_filename(filename,4) is not None:
+
+        # Append the file name, exposure time, and step number to the lists if the filename has a step number
+        if extract_numbers_from_filename(filename, 4) is not None:
             file_list.append((filename, exposure_time))
-            step_list.append(extract_numbers_from_filename(filename,4))
+            step_list.append(extract_numbers_from_filename(filename, 4))
             filepaths.append(filepath)
-        else: 
-            allfiles=allfiles.pop(idx)
-        
+        else:
+            # Remove the file path from the list if it does not have a step number
+            allfiles = allfiles.pop(idx)
 
     # Create a pandas DataFrame from the file list
-    df = pd.DataFrame( file_list, columns=['File Name', 'Exposure Time'])
-    df['File Path']=filepaths
+    df = pd.DataFrame(file_list, columns=['File Name', 'Exposure Time'])
+    df['File Path'] = filepaths
     df['Step'] = step_list
     df['Gas Type'] = df['File Name'].str.extract(r'_([A-Z][a-z0-9])_')
-    df.to_csv(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/fits_database.csv',index=False)
+
+    # Save the DataFrame as a CSV file
+    df.to_csv(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/fits_database.csv', index=False)
+
     return df
 
-def extract_numbers_from_filename(filename,consecutive_numbers=4):
-    string=f"\d"+"{"+f"{consecutive_numbers}"+"}"
-    numbers = re.findall(string, filename)
-    if len(numbers)==0:
+def extract_numbers_from_filename(filename, consecutive_numbers=4):
+    """
+    Extracts consecutive numbers from a filename.
+
+    Args:
+        filename (str): The filename from which to extract numbers.
+        consecutive_numbers (int): The number of consecutive digits to extract. Default is 4.
+
+    Returns:
+        int or None: The extracted number if found, otherwise None.
+    """
+    # Create a regular expression pattern to match consecutive digits
+    pattern = r"\d{" + f"{consecutive_numbers}" + "}"
+    
+    # Find all matches of the pattern in the filename
+    numbers = re.findall(pattern, filename)
+    
+    # If no numbers are found, return None
+    if len(numbers) == 0:
         return None
     else:
-        return [int(num) for num in numbers][0]
-
+        # Convert the first extracted number to an integer and return it
+        return int(numbers[0])
 
 if __name__ == "__main__":
+    # Set plot aesthetics
     set_plot_aesthetics()
-    df=generate_fits_database()
-    df=pd.read_csv(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/fits_database.csv')
-    df.sort_values(by=['Step'],inplace=True)
+
+    # Generate the FITS database
+    df = generate_fits_database()
+
+    # Read the FITS database from a CSV file
+    df = pd.read_csv(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/fits_database.csv')
+
+    # Sort the dataframe by 'Step' column
+    df.sort_values(by=['Step'], inplace=True)
+
+    # Convert the dataframe to HTML and save it
     df.to_html(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/fits_database.html')
-    fig,ax_spectrum = plt.subplots(figsize=(15, 9))
-    ymax_lim=0
-    first_idx=0
-    Gas_filter='Ar'
-    file_filter='03_01'
-    file_filter2='_'
-    exp_filter='120sec'
+
+    # Create a figure and axis for the spectrum plot
+    fig, ax_spectrum = plt.subplots(figsize=(15, 9))
+
+    # Set the maximum y-axis limit for the plot
+    ymax_lim = 0
+
+    # Initialize the index variable
+    first_idx = 0
+
+    # Set the regex filter parameters for files
+    Gas_filter = 'Ar'
+    file_filter = '03_01'
+    file_filter2 = '_'
+    exp_filter = '120sec'
     try: 
         for idx, row in df.iterrows():
             filter=(Gas_filter in row['File Path'])&((file_filter in row['File Path'])&(file_filter2 in row['File Path']))&(exp_filter in row['File Path'])#|('He' in row['File Path'])) #&('1253' in row['File Path'])
@@ -843,43 +918,53 @@ if __name__ == "__main__":
             print("No fit for subregion")
 
      
-    gaussians_filename= os.path.join('/Users/arkhan/Documents/Aspera_Lamp_analysis/data/'+f'{Gas_filter}_lines_from_spectra_gaussian.csv')
-    gaussian_data.to_csv(gaussians_filename,index=False)
-    ref_lines=get_nist_lines(Gas_filter,min(full_specturm.spectral_axis),max(full_specturm.spectral_axis))
-    NI_lines=get_nist_lines('N2',min(full_specturm.spectral_axis),max(full_specturm.spectral_axis))
-    OI_lines=get_nist_lines('O',min(full_specturm.spectral_axis),max(full_specturm.spectral_axis))
-    HI_lines=get_nist_lines('H',min(full_specturm.spectral_axis),max(full_specturm.spectral_axis))
+    # Save Gaussian data to a CSV file
+    gaussians_filename = os.path.join('/Users/arkhan/Documents/Aspera_Lamp_analysis/data/' + f'{Gas_filter}_lines_from_spectra_gaussian.csv')
+    gaussian_data.to_csv(gaussians_filename, index=False)
+
+    # Get reference lines for different elements
+    ref_lines = get_nist_lines(Gas_filter, min(full_specturm.spectral_axis), max(full_specturm.spectral_axis))
+    NI_lines = get_nist_lines('N2', min(full_specturm.spectral_axis), max(full_specturm.spectral_axis))
+    OI_lines = get_nist_lines('O', min(full_specturm.spectral_axis), max(full_specturm.spectral_axis))
+    HI_lines = get_nist_lines('H', min(full_specturm.spectral_axis), max(full_specturm.spectral_axis))
+
+    # Plot the spectra with reference lines
     plt.minorticks_on()
-    # Add secondary x-axis
     plt.tight_layout()
-    fig_file=f"Wavelength_calibrated_{Gas_filter}_spectra_with_lines.png"
+    fig_file = f"Wavelength_calibrated_{Gas_filter}_spectra_with_lines.png"
     plt.savefig(fig_file)
     pickle.dump((fig, ax_spectrum), open(f'{fig_file[:-4]}.pickle', 'wb'))
     plt.show()
-    argon_1048_region= SpectralRegion(1042*u.AA,1054*u.AA)
-    argon_1048_specturm=extract_region(full_specturm,argon_1048_region)
-    argon_1048_sigma_width=gaussian_sigma_width(argon_1048_specturm)
-    print(f'{argon_1048_sigma_width =}')
-    argon_1048_centroid=centroid(argon_1048_specturm)
-    print(f'{argon_1048_centroid =}')
-    argon_1048_region_5sigma= SpectralRegion(argon_1048_centroid-2.5*argon_1048_sigma_width,argon_1048_centroid+2.5*argon_1048_sigma_width)
-    argon_1048_specturm_5sigma=extract_region(full_specturm,argon_1048_region_5sigma)
-    bins=len(argon_1048_specturm_5sigma.spectral_axis)
-    print(f'{bins =}')
-    # bin_size=(argon_1048_specturm_5sigma.spectral_axis[1]-argon_1048_specturm_5sigma.spectral_axis[0])
-    # print(bin_size)
-    argon_1048_lineflux=scipy.integrate.trapz(argon_1048_specturm_5sigma.flux.value,argon_1048_specturm_5sigma.spectral_axis.value)
-    print(f'{argon_1048_lineflux =}')
-    plt.plot(argon_1048_specturm_5sigma.spectral_axis.value, argon_1048_specturm_5sigma.flux.value, label='Argon 1048')
-    plt.scatter(argon_1048_specturm_5sigma.spectral_axis.value, argon_1048_specturm_5sigma.flux.value)
-    plt.vlines(argon_1048_centroid.value, 0, max(argon_1048_specturm_5sigma.flux.value), alpha=0.4, color='black')
-    plt.vlines(argon_1048_centroid.value-2.5*argon_1048_sigma_width.value, 0, max(argon_1048_specturm_5sigma.flux.value), alpha=0.4, color='black', linestyles='dotted')
-    plt.vlines(argon_1048_centroid.value+2.5*argon_1048_sigma_width.value, 0, max(argon_1048_specturm_5sigma.flux.value), alpha=0.4, color='black', linestyles='dotted')
+
+    # Extract a region around the Argon 1048 line
+    argon_1048_region = SpectralRegion(1042 * u.AA, 1054 * u.AA)
+    argon_1048_spectrum = extract_region(full_specturm, argon_1048_region)
+
+    # Calculate the width and centroid of the Argon 1048 line
+    argon_1048_sigma_width = gaussian_sigma_width(argon_1048_spectrum)
+    argon_1048_centroid = centroid(argon_1048_spectrum)
+
+    # Define a region around the Argon 1048 line using 5 sigma width
+    argon_1048_region_5sigma = SpectralRegion(argon_1048_centroid - 2.5 * argon_1048_sigma_width, argon_1048_centroid + 2.5 * argon_1048_sigma_width)
+    argon_1048_spectrum_5sigma = extract_region(full_specturm, argon_1048_region_5sigma)
+
+    # Calculate the number of bins in the 5 sigma region
+    bins = len(argon_1048_spectrum_5sigma.spectral_axis)
+
+    # Calculate the line flux of the Argon 1048 line
+    argon_1048_lineflux = scipy.integrate.trapz(argon_1048_spectrum_5sigma.flux.value, argon_1048_spectrum_5sigma.spectral_axis.value)
+    sigma_cut=5*(argon_1048_sigma_width.value/2)
+    # Plot the Argon 1048 spectrum with the line and centroid markers
+    plt.plot(argon_1048_spectrum_5sigma.spectral_axis.value, argon_1048_spectrum_5sigma.flux.value, label='Argon 1048')
+    plt.scatter(argon_1048_spectrum_5sigma.spectral_axis.value, argon_1048_spectrum_5sigma.flux.value)
+    plt.vlines(argon_1048_centroid.value, 0, max(argon_1048_spectrum_5sigma.flux.value), alpha=0.4, color='black')
+    plt.vlines(argon_1048_centroid.value - sigma_cut, 0, max(argon_1048_spectrum_5sigma.flux.value), alpha=0.4, color='black', linestyles='dotted')
+    plt.vlines(argon_1048_centroid.value + sigma_cut, 0, max(argon_1048_spectrum_5sigma.flux.value), alpha=0.4, color='black', linestyles='dotted')
     plt.xlabel(rf'$Wavelength (\AA)$', labelpad=8)
     plt.ylabel('$Flux (counts/s/\AA)$', labelpad=8)
     plt.title('Argon 1048 Spectrum')
     plt.gca().tick_params(axis='both', pad=5)
     plt.legend()
     plt.xlim(1042, 1054)
-    plt.ylim(0, max(argon_1048_specturm.flux.value))
+    plt.ylim(0, max(argon_1048_spectrum.flux.value))
     plt.show()
