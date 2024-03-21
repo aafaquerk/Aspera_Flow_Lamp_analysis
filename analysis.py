@@ -12,6 +12,7 @@ import warnings
 from astropy import units as u, io, modeling
 from astropy.io import fits
 from astropy.modeling.fitting import LinearLSQFitter
+from astropy.modeling import models
 from scipy.ndimage import rotate, median_filter
 import scipy.integrate
 from scipy.signal import find_peaks
@@ -28,7 +29,6 @@ from specutils.manipulation import extract_region, LinearInterpolatedResampler, 
 from specutils.analysis import line_flux, centroid, gaussian_sigma_width
 #NIST database for atomic lines
 from astroquery.nist import Nist
-from astropy.modeling import models
 # Define the global variables
 global angle,image_vmin,image_vmax,ymin,ymax,extract_xmax,extract_xmin,shift_per_step
 # Define the extraction region for the spectrum
@@ -509,40 +509,20 @@ def process_main():
     # process_files_with_subplots(paths)
     # process_files_images(paths)
     # process_files_with_subplots_images(paths)
+    paths=glob.glob(r'/Users/arkhan/Documents/Aspera_Lamp_analysis/data/*/*/*Ar*12*.fits',recursive=True)
     fig, ax_spectrum = plt.subplots(figsize=(8, 6))
     minwave = 105 * u.nm
     maxwave = 122 * u.nm
-    # then we search for atomic lines
-    # We are only interested in neutral lines, assuming the lamps are not hot enough to ionize the atoms
-    Ar_lines = Nist.query(minwave,maxwave, linename="Ar I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-    Ar_lines=Ar_lines[(Ar_lines['Observed']>minwave.value)&(Ar_lines['Observed']<maxwave.value)]
-
-
-    He_lines = Nist.query(minwave,maxwave, linename="He I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-    He_lines=He_lines[(He_lines['Observed']>minwave.value)&(He_lines['Observed']<maxwave.value)]
-
-    NI_lines = Nist.query(minwave,maxwave, linename="N I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-
-    NI_lines=NI_lines[(NI_lines['Observed']>minwave.value)&(NI_lines['Observed']<maxwave.value)]
-
-    OI_lines = Nist.query(minwave,maxwave, linename="O I",
-                energy_level_unit='eV', output_order='wavelength',
-                wavelength_type='vacuum')
-
-    OI_lines=OI_lines[(OI_lines['Observed']>minwave.value)&(OI_lines['Observed']<maxwave.value)]
-    print(NI_lines)
-    print(Ar_lines)
-    print(OI_lines)
+    Ar_lines = get_nist_lines('Ar', minwave, maxwave)
+    NI_lines = get_nist_lines('N', minwave, maxwave)
+    OI_lines = get_nist_lines('O', minwave, maxwave)
+    He_lines = get_nist_lines('He', minwave, maxwave)
+    HI_lines = get_nist_lines('H', minwave, maxwave)
     #plt.vlines(Ar_lines['Observed'], 0,250, color='grey', alpha=0.4,label='Ar I')
     #plt.vlines(NI_lines['Observed'], 0,250, color='blue', alpha=0.4,label='N I')
     # plt.vlines(OI_lines['Observed'], 0,250, color='green', alpha=0.4,label='O I')
     # plt.vlines(He_lines['Observed'], 0,250, color='cyan', alpha=0.4,label='He I')
+    # plt.vlines(HI_lines['Observed'], 0,250, color='red', alpha=0.4,label='H I')
     for filename in paths:
         filtered_spectrum = get_spectrum_from_fits(filename, angle, extract_ymin, extract_ymax,extract_xmin,extract_xmax)
         #plot_spectrum_1D(filtered_spectrum)
