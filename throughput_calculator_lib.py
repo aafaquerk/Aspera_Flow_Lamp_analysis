@@ -1,10 +1,11 @@
+import dataclasses
+@dataclasses.dataclass
 class Reflective_optic:
-    def __init__(self, coating, size, radius, name, location):
-        self.coating = coating  # dict[float, float]
-        self.size = size  # float
-        self.radius = radius  # float
-        self.name = name  # str
-        self.location = location  # int
+    coating: dict[float, float]
+    size: float
+    radius: float
+    name: str
+    location: int
     
     def set_coating(self, coating: dict[float, float]):
         if isinstance(coating, dict) and len(coating) == 2 and all(isinstance(x, float) for x in coating.values()):
@@ -176,3 +177,4 @@ class InputFlux:
 Input_flux: InputFlux = InputFlux(source_type="Point source", wavelength=0.5, relative_spectral_irradiance=0.5, total_flux=0.5, spatial_distribution="Uniform")
 Primary_mirror: Reflective_optic = Reflective_optic(coating={0.5: 0.9, 0.6: 0.8}, size=0.5, radius=0.5, name="Primary mirror", location=0)
 Grating: Grating_optic = Grating_optic(coating={0.5: 0.9, 0.6: 0.8}, size=0.5, radius=0.5, name="Grating", location=1, order=1)
+print(Input_flux.wavelength)
