@@ -775,6 +775,24 @@ def extract_numbers_from_filename(filename, consecutive_numbers=4):
         return int(numbers[0])
 
 if __name__ == "__main__":
+
+    import argparse
+
+    # Create an argument parser
+    parser = argparse.ArgumentParser(description='Gas filter options')
+
+    # Add gas filter options
+    parser.add_argument('--gas_filter', type=str, default='Ar', help='Gas filter type')
+
+    # Parse the command line arguments
+    args = parser.parse_args()
+
+    # Get the gas filter value
+    gas_filter = args.gas_filter
+
+    # Use the gas filter value in your code
+    # For example:
+    Gas_filter = gas_filter
     # Set plot aesthetics
     set_plot_aesthetics()
 
@@ -796,7 +814,7 @@ if __name__ == "__main__":
     # Set the maximum y-axis limit for the plot
     ymax_lim = 0
 
-    # Initialize the index variable
+    # Initialize the index variable to check if the filtered spectrum is the first one
     first_idx = 0
 
     # Set the regex filter parameters for files
